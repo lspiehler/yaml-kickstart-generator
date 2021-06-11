@@ -95,7 +95,7 @@ if(property_exists($pbv, 'ks_time')) {
         for($i = 0; $i <= count($pbv->ks_time->ntpservers) - 1; $i++) {
             array_push($ntpservers, $pbv->ks_time->ntpservers[$i]);
         }
-        array_push($timeline, implode($ntpservers, ','));
+        array_push($timeline, '--ntpservers=' . implode($ntpservers, ','));
     }
     array_push($ks, implode($timeline, ' '));
 }
@@ -193,7 +193,7 @@ for($i = 0; $i <= count($pbv->vm_storage->logical->vgs) - 1; $i++) {
 
 //array_push($ks, 'firstboot --disable');
 if(property_exists($pbv, 'ks_rootpw')) {
-    array_push($ks, 'rootpw --iscrypted' . $pbv->ks_rootpw);
+    array_push($ks, 'rootpw --iscrypted ' . $pbv->ks_rootpw);
 }
 
 array_push($ks, '%packages');
