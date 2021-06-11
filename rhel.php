@@ -203,6 +203,7 @@ array_push($ks, 'kexec-tools');
 array_push($ks, '%end');
 
 array_push($ks, '%post --log="/var/log/ks-post.log"');
+array_push($ks, "");
 
 
 if(property_exists($pbv, 'ks_user')) {
@@ -243,9 +244,9 @@ if(property_exists($pbv, 'ks_user')) {
     array_push($ks, 'echo -e \'' . $pbv->ks_user->name . '\tALL=(ALL)\tNOPASSWD:\tALL\' > /etc/sudoers.d/' . $pbv->ks_user->name);
 }
 
-array_push($ks, '%end');
+array_push($ks, "\n%end");
 
-$resp = implode($ks, "\r\n");
+$resp = implode($ks, "\n");
 $hash = hash("sha1", $resp);
 
 $file = fopen("./kickstarts/" . $hash . ".ks", "w");
