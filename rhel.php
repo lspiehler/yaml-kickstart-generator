@@ -177,7 +177,7 @@ for($i = 0; $i <= count($pbv->vm_storage->logical->vgs) - 1; $i++) {
     array_push($vgline, implode($pvs, ' '));
 
     array_push($ks, implode($vgline, ' '));
-    $line = [];
+    $vgline = [];
 }
 
 
