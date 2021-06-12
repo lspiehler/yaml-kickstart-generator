@@ -4,6 +4,15 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
+function base64UrlEncode($data) {
+    $base64Url = strtr(base64_encode($data), '+/', '-_');
+ 
+    return rtrim($base64Url, '=');
+}
+ 
+function base64UrlDecode( $base64Url) {
+    return base64_decode(strtr($base64Url, '-_', '+/'), true);
+}
 
 function lookupPV($pbv, $pv) {
     for($i = 0; $i <= count($pbv->vm_storage->physical) - 1; $i++) {
@@ -21,6 +30,12 @@ function lookupPV($pbv, $pv) {
 
 
 header("Content-Type: text/plain");
+
+if(isset($_GET['data'])) {
+    $compressed = base64UrlDecode($_GET['data']);
+    echo bzdecompress($compressed);
+    exit;
+}
 
 $ks = [];
 
@@ -246,15 +261,43 @@ if(property_exists($pbv, 'ks_user')) {
 
 array_push($ks, "\n%end");
 
+
+//generate random data to test support for very long URLs (apache's default limit is 8177)
+/*
+$permitted_chars = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+ 
+function generate_string($input, $strength = 16) {
+    $input_length = strlen($input);
+    $random_string = '';
+    for($i = 0; $i < $strength; $i++) {
+        $random_character = $input[mt_rand(0, $input_length - 1)];
+        $random_string .= $random_character;
+    }
+ 
+    return $random_string;
+}
+ 
+// Output: iNCHNGzByPjhApvn7XBD
+for($var = 0; $i <= 60; $i++) {
+    array_push($ks, '#' . generate_string($permitted_chars, 100));
+}
+*/
+
 $resp = implode($ks, "\n");
 $hash = hash("sha1", $resp);
 
+/*
 $file = fopen("./kickstarts/" . $hash . ".ks", "w");
 
 fwrite($file, $resp);
 fclose($file);
+*/
 
-header("Link: /kickstarts/". $hash . ".ks");
+$bzstr = bzcompress($resp, 9);
+$data = base64UrlEncode($bzstr);
+
+//header("Link: /kickstarts/". $hash . ".ks");
+header("Location: rhel.php?data=" . $data);
 
 echo $resp;
 
