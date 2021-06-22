@@ -4,6 +4,8 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
+$stripedpvs = array();
+
 function base64UrlEncode($data) {
     $base64Url = strtr(base64_encode($data), '+/', '-_');
  
@@ -38,6 +40,7 @@ if(isset($_GET['data'])) {
 }
 
 $ks = [];
+$unsupportedlvm = [];
 
 $data = file_get_contents('php://input');
 
@@ -45,13 +48,30 @@ $pbv = json_decode($data);
 //echo(count($pbv['storage']['physical']));
 //print_r($pbv->vm_storage->physical);
 
+//populate stripedpvs array with pvs that will be in vgs with striped lvs
+for($i = 0; $i <= count($pbv->vm_storage->logical->vgs) - 1; $i++) {
+    for($j = 0; $j <= count($pbv->vm_storage->logical->vgs[$i]->lvs) - 1; $j++) {
+        if(property_exists($pbv->vm_storage->logical->vgs[$i]->lvs[$j], 'layout')) {
+            if($pbv->vm_storage->logical->vgs[$i]->lvs[$j]->layout == 'striped' || $pbv->vm_storage->logical->vgs[$i]->lvs[$j]->layout == 'mirror') {
+                for($k = 0; $k <= count($pbv->vm_storage->logical->vgs[$i]->pvs) - 1; $k++) {
+                    array_push($stripedpvs, $pbv->vm_storage->logical->vgs[$i]->pvs[$k]);
+                }
+                break;
+            }
+        }
+    }
+}
 
+//print_r($stripedpvs);
 
 //build ignoredisk string, disks with > 0 partitions or lvm set to true (use whole disk) will be excluded
 $ignoredisks = [];
 for($i = 0; $i <= count($pbv->vm_storage->physical) - 1; $i++) {
     if(property_exists($pbv->vm_storage->physical[$i], 'lvm') && $pbv->vm_storage->physical[$i]->lvm===true) {
-        array_push($ignoredisks, str_replace("/dev/", "", $pbv->vm_storage->physical[$i]->disk));
+        //ignore disks that use non-linear lvm layouts because the will be created in a bash script outside of kickstart
+        //if(!in_array($pbv->vm_storage->physical[$i]->disk, $stripedpvs)) {
+            array_push($ignoredisks, str_replace("/dev/", "", $pbv->vm_storage->physical[$i]->disk));
+        //}
     } else {
         if(property_exists($pbv->vm_storage->physical[$i], 'parts')) {
             if(count($pbv->vm_storage->physical[$i]->parts) >= 1) {
@@ -139,7 +159,11 @@ array_push($ks, '');
 $parts = [];
 for($i = 0; $i <= count($pbv->vm_storage->physical) - 1; $i++) {
     if(property_exists($pbv->vm_storage->physical[$i], 'lvm') && $pbv->vm_storage->physical[$i]->lvm===true) {
-        array_push($ks, 'part pv.' . $i . ' --grow --onpart="' . str_replace("/dev/", "", $pbv->vm_storage->physical[$i]->disk) . '"');
+        if(in_array($pbv->vm_storage->physical[$i]->disk, $stripedpvs)) {
+            array_push($unsupportedlvm, 'pvcreate -y -ff ' . $pbv->vm_storage->physical[$i]->disk . ' &> /dev/tty1');
+        } else {
+            array_push($ks, 'part pv.' . $i . ' --grow --onpart="' . str_replace("/dev/", "", $pbv->vm_storage->physical[$i]->disk) . '"');
+        }
     } else {
         for($j = 0; $j <= count($pbv->vm_storage->physical[$i]->parts) - 1; $j++) {
             $size;
@@ -156,10 +180,14 @@ for($i = 0; $i <= count($pbv->vm_storage->physical) - 1; $i++) {
             }
             //print_r($pbv->vm_storage->physical[$i]->parts[$j]);
             if(property_exists($pbv->vm_storage->physical[$i]->parts[$j], 'fstype')) {
-                array_push($ks, 'part ' . $pbv->vm_storage->physical[$i]->parts[$j]->mountpoint . ' --fstype="' . $pbv->vm_storage->physical[$i]->parts[$j]->fstype . '" --size="' . $pbv->vm_storage->physical[$i]->parts[$j]->size_mb . '"');
+                if(!in_array($pbv->vm_storage->physical[$i]->disk, $stripedpvs)) {
+                    array_push($ks, 'part ' . $pbv->vm_storage->physical[$i]->parts[$j]->mountpoint . ' --fstype="' . $pbv->vm_storage->physical[$i]->parts[$j]->fstype . '" --size="' . $pbv->vm_storage->physical[$i]->parts[$j]->size_mb . '"');
+                }
             } else {
                 if(property_exists($pbv->vm_storage->physical[$i]->parts[$j], 'lvm') && $pbv->vm_storage->physical[$i]->parts[$j]->lvm===true) {
-                    array_push($ks, 'part pv.' . $i . $j . ' ' . $size . ' --ondisk="' . str_replace("/dev/", "", $pbv->vm_storage->physical[$i]->disk) . '"');
+                    if(!in_array($pbv->vm_storage->physical[$i]->disk, $stripedpvs)) {
+                        array_push($ks, 'part pv.' . $i . $j . ' ' . $size . ' --ondisk="' . str_replace("/dev/", "", $pbv->vm_storage->physical[$i]->disk) . '"');
+                    }
                 }
             }
         }
@@ -171,7 +199,12 @@ $vgs = [];
 $vgline = [];
 for($i = 0; $i <= count($pbv->vm_storage->logical->vgs) - 1; $i++) {
     $pvs = [];
+    $striped = False;
     for($j = 0; $j <= count($pbv->vm_storage->logical->vgs[$i]->pvs) - 1; $j++) {
+        if(in_array($pbv->vm_storage->logical->vgs[$i]->pvs[$j], $stripedpvs)) {
+            $striped = True;
+            break;
+        }
         $pv = lookupPV($pbv, $pbv->vm_storage->logical->vgs[$i]->pvs[$j]);
         if($pv) {
             array_push($pvs, $pv);
@@ -182,25 +215,56 @@ for($i = 0; $i <= count($pbv->vm_storage->logical->vgs) - 1; $i++) {
         }
     }
 
-    array_push($vgline, 'volgroup');
-    array_push($vgline, $pbv->vm_storage->logical->vgs[$i]->name);
-    if(property_exists($pbv->vm_storage->logical->vgs[$i], 'pesize')) {
-        if($pbv->vm_storage->logical->vgs[$i]->pesize) {
-            array_push($vgline, '--pesize=' . $pbv->vm_storage->logical->vgs[$i]->pesize);
+    if($striped === False) {
+        array_push($vgline, 'volgroup');
+        array_push($vgline, $pbv->vm_storage->logical->vgs[$i]->name);
+        if(property_exists($pbv->vm_storage->logical->vgs[$i], 'pesize')) {
+            if($pbv->vm_storage->logical->vgs[$i]->pesize) {
+                array_push($vgline, '--pesize=' . $pbv->vm_storage->logical->vgs[$i]->pesize);
+            }
         }
-    }
-    array_push($vgline, implode($pvs, ' '));
+        array_push($vgline, implode($pvs, ' '));
 
-    array_push($ks, implode($vgline, ' '));
-    $vgline = [];
+        array_push($ks, implode($vgline, ' '));
+        $vgline = [];
+    } else {
+        array_push($vgline, 'vgcreate');
+        array_push($vgline, $pbv->vm_storage->logical->vgs[$i]->name);
+        if(property_exists($pbv->vm_storage->logical->vgs[$i], 'pesize')) {
+            if($pbv->vm_storage->logical->vgs[$i]->pesize) {
+                array_push($vgline, '-s ' . $pbv->vm_storage->logical->vgs[$i]->pesize . 'K');
+            }
+        }
+        array_push($vgline, implode($pbv->vm_storage->logical->vgs[$i]->pvs, ' '));
+        array_push($vgline, ' &> /dev/tty1');
+        array_push($unsupportedlvm, implode($vgline, ' '));
+        array_push($ks, 'volgroup ' . $pbv->vm_storage->logical->vgs[$i]->name . ' --useexisting');
+        $vgline = [];
+    }
 }
 
 
 $lvs = [];
 for($i = 0; $i <= count($pbv->vm_storage->logical->vgs) - 1; $i++) {
     for($j = 0; $j <= count($pbv->vm_storage->logical->vgs[$i]->lvs) - 1; $j++) {
-        //print_r($pbv->vm_storage->logical->vgs[$i]->lvs[$j]);
-        array_push($ks, 'logvol ' . $pbv->vm_storage->logical->vgs[$i]->lvs[$j]->mountpoint . ' --size="' . $pbv->vm_storage->logical->vgs[$i]->lvs[$j]->size_mb . '" --vgname="' . $pbv->vm_storage->logical->vgs[$i]->name . '" --name="' . $pbv->vm_storage->logical->vgs[$i]->lvs[$j]->name . '"');
+        $logvol = 'logvol ' . $pbv->vm_storage->logical->vgs[$i]->lvs[$j]->mountpoint . ' --fstype="' . $pbv->vm_storage->logical->vgs[$i]->lvs[$j]->fstype . '" --vgname="' . $pbv->vm_storage->logical->vgs[$i]->name . '" --name="' . $pbv->vm_storage->logical->vgs[$i]->lvs[$j]->name . '"';
+        if(property_exists($pbv->vm_storage->logical->vgs[$i]->lvs[$j], 'layout')) {
+            if($pbv->vm_storage->logical->vgs[$i]->lvs[$j]->layout == 'striped' || $pbv->vm_storage->logical->vgs[$i]->lvs[$j]->layout == 'mirror') {
+                array_push($ks, $logvol . ' --useexisting');
+                $lvcreate = ['lvcreate -L ' . $pbv->vm_storage->logical->vgs[$i]->lvs[$j]->size_mb . ' -i ' . count($pbv->vm_storage->logical->vgs[$i]->pvs)];
+                if(property_exists($pbv->vm_storage->logical->vgs[$i]->lvs[$j], 'stripe_size')) {
+                    array_push($lvcreate, '-I ' . $pbv->vm_storage->logical->vgs[$i]->lvs[$j]->stripe_size);
+                }
+                array_push($lvcreate, '-n ' . $pbv->vm_storage->logical->vgs[$i]->lvs[$j]->name);
+                array_push($lvcreate, $pbv->vm_storage->logical->vgs[$i]->name);
+                array_push($lvcreate, '&> /dev/tty1');
+                array_push($unsupportedlvm, implode($lvcreate, ' '));
+            } else {
+                array_push($ks, $logvol . ' --size="' . $pbv->vm_storage->logical->vgs[$i]->lvs[$j]->size_mb . '"');
+            }
+        } else {
+            array_push($ks, $logvol . ' --size="' . $pbv->vm_storage->logical->vgs[$i]->lvs[$j]->size_mb . '"');
+        }
     }
 }
 
@@ -262,6 +326,22 @@ if(property_exists($pbv, 'ks_user')) {
 array_push($ks, "\n%end");
 
 
+$config = [];
+
+if(count($unsupportedlvm) > 0) {
+    array_push($config, "%pre");
+    //array_push($config, "#!/bin/bash");
+    for($i = 0; $i <= count($unsupportedlvm) - 1; $i++) {
+        array_push($config, $unsupportedlvm[$i]);
+    }
+    array_push($config, "%end");
+    array_push($config, "");
+}
+
+for($i = 0; $i <= count($ks) - 1; $i++) {
+    array_push($config, $ks[$i]);
+}
+
 //generate random data to test support for very long URLs (apache's default limit is 8177)
 /*
 $permitted_chars = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -283,22 +363,35 @@ for($var = 0; $i <= 60; $i++) {
 }
 */
 
-$resp = implode($ks, "\n");
-$hash = hash("sha1", $resp);
+$resp = implode($config, "\n");
 
-/*
-$file = fopen("./kickstarts/" . $hash . ".ks", "w");
+$stateless = False;
+if(property_exists($pbv, 'ks_stateless')) {
+    if($pbv->ks_stateless) {
+        $stateless = True;
+    }
+}
 
-fwrite($file, $resp);
-fclose($file);
-*/
+if($stateless) {
+    $bzstr = bzcompress($resp, 9);
+    $data = base64UrlEncode($bzstr);
 
-$bzstr = bzcompress($resp, 9);
-$data = base64UrlEncode($bzstr);
+    header("Location: rhel.php?data=" . $data);
+} else {
 
-//header("Link: /kickstarts/". $hash . ".ks");
-header("Location: rhel.php?data=" . $data);
+    $hash = hash("sha1", $resp);
+    $file = fopen("./kickstarts/" . $hash . ".ks", "w");
 
-echo $resp;
+    fwrite($file, $resp);
+    fclose($file);
+
+    $url = (isset($_SERVER['HTTPS']) ? "https" : "http") . "://$_SERVER[HTTP_HOST]";
+
+    http_response_code(201);
+
+    header("Link: " . $url . "/ks/kickstarts/". $hash . ".ks");
+
+    echo $resp;
+}
 
 ?>
