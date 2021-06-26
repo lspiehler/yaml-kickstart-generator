@@ -251,9 +251,26 @@ for($i = 0; $i <= count($pbv->vm_storage->logical->vgs) - 1; $i++) {
         if(property_exists($pbv->vm_storage->logical->vgs[$i]->lvs[$j], 'layout')) {
             if($pbv->vm_storage->logical->vgs[$i]->lvs[$j]->layout == 'striped' || $pbv->vm_storage->logical->vgs[$i]->lvs[$j]->layout == 'mirror') {
                 array_push($ks, $logvol . ' --useexisting');
-                $lvcreate = ['lvcreate -L ' . $pbv->vm_storage->logical->vgs[$i]->lvs[$j]->size_mb . ' -i ' . count($pbv->vm_storage->logical->vgs[$i]->pvs)];
-                if(property_exists($pbv->vm_storage->logical->vgs[$i]->lvs[$j], 'stripe_size')) {
-                    array_push($lvcreate, '-I ' . $pbv->vm_storage->logical->vgs[$i]->lvs[$j]->stripe_size);
+                $lvcreate = ['lvcreate -L ' . $pbv->vm_storage->logical->vgs[$i]->lvs[$j]->size_mb];
+                if($pbv->vm_storage->logical->vgs[$i]->lvs[$j]->layout=='striped') {
+                    array_push($lvcreate, ' -i ' . count($pbv->vm_storage->logical->vgs[$i]->pvs));
+                    if(property_exists($pbv->vm_storage->logical->vgs[$i]->lvs[$j], 'stripe_size')) {
+                        array_push($lvcreate, '-I ' . $pbv->vm_storage->logical->vgs[$i]->lvs[$j]->stripe_size);
+                    }
+                } elseif($pbv->vm_storage->logical->vgs[$i]->lvs[$j]->layout=='mirror' || $pbv->vm_storage->logical->vgs[$i]->lvs[$j]->layout=='mirrored') {
+                    array_push($lvcreate, '--type mirror');
+                    if(property_exists($pbv->vm_storage->logical->vgs[$i]->lvs[$j], 'mirrors')) {
+                        array_push($lvcreate, '-m ' . $pbv->vm_storage->logical->vgs[$i]->lvs[$j]->mirrors);
+                    } else {
+                        array_push($lvcreate, '-m ' . (count($pbv->vm_storage->logical->vgs[$i]->pvs) - 1));
+                    }
+                } else {
+
+                }
+                if(property_exists($pbv->vm_storage->logical->vgs[$i]->lvs[$j], 'lv_extra_args')) {
+                    if($pbv->vm_storage->logical->vgs[$i]->lvs[$j]->lv_extra_args) {
+                        array_push($lvcreate, $pbv->vm_storage->logical->vgs[$i]->lvs[$j]->lv_extra_args);
+                    }
                 }
                 array_push($lvcreate, '-n ' . $pbv->vm_storage->logical->vgs[$i]->lvs[$j]->name);
                 array_push($lvcreate, $pbv->vm_storage->logical->vgs[$i]->name);
@@ -276,9 +293,16 @@ if(property_exists($pbv, 'ks_rootpw')) {
 }
 
 array_push($ks, '%packages');
-//array_push($ks, '@core');
-array_push($ks, '@^minimal-environment');
-array_push($ks, 'kexec-tools');
+
+if(property_exists($pbv, 'ks_packages') && count($pbv->ks_packages) > 0) {
+    for($i = 0; $i <= count($pbv->ks_packages) - 1; $i++) {
+        array_push($ks, $pbv->ks_packages[$i]);
+    }
+} else {
+    array_push($ks, '@^minimal-environment');
+    array_push($ks, 'kexec-tools');
+}
+
 array_push($ks, '%end');
 
 array_push($ks, '%post --log="/var/log/ks-post.log"');
