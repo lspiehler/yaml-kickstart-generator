@@ -400,7 +400,8 @@ if($stateless) {
     $bzstr = bzcompress($resp, 9);
     $data = base64UrlEncode($bzstr);
 
-    header("Location: rhel.php?data=" . $data);
+    //header("Link: /kickstarts/". $hash . ".ks");
+    header("Location: /rhel.php?data=" . $data);
 } else {
 
     $hash = hash("sha1", $resp);
@@ -409,11 +410,11 @@ if($stateless) {
     fwrite($file, $resp);
     fclose($file);
 
-    $url = (isset($_SERVER['HTTPS']) ? "https" : "http") . "://$_SERVER[HTTP_HOST]";
+    $url = (isset($_SERVER['HTTPS']) ? "http" : "https") . "://$_SERVER[HTTP_HOST]";
 
     http_response_code(201);
 
-    header("Link: " . $url . "/ks/kickstarts/". $hash . ".ks");
+    header("Link: " . $url . "/kickstarts/". $hash . ".ks");
 
     echo $resp;
 }
