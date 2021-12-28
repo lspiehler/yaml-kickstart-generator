@@ -80,7 +80,7 @@ for($i = 0; $i <= count($pbv->vm_storage->physical) - 1; $i++) {
         }
     }
 }
-array_push($ks, 'ignoredisk --only-use=' . implode($ignoredisks, ","));
+array_push($ks, 'ignoredisk --only-use=' . implode(",", $ignoredisks));
 
 
 
@@ -130,9 +130,9 @@ if(property_exists($pbv, 'ks_time')) {
         for($i = 0; $i <= count($pbv->ks_time->ntpservers) - 1; $i++) {
             array_push($ntpservers, $pbv->ks_time->ntpservers[$i]);
         }
-        array_push($timeline, '--ntpservers=' . implode($ntpservers, ','));
+        array_push($timeline, '--ntpservers=' . implode(',', $ntpservers));
     }
-    array_push($ks, implode($timeline, ' '));
+    array_push($ks, implode(' ', $timeline));
 }
 
 
@@ -223,9 +223,9 @@ for($i = 0; $i <= count($pbv->vm_storage->logical->vgs) - 1; $i++) {
                 array_push($vgline, '--pesize=' . $pbv->vm_storage->logical->vgs[$i]->pesize);
             }
         }
-        array_push($vgline, implode($pvs, ' '));
+        array_push($vgline, implode(' ', $pvs));
 
-        array_push($ks, implode($vgline, ' '));
+        array_push($ks, implode(' ', $vgline));
         $vgline = [];
     } else {
         array_push($vgline, 'vgcreate');
@@ -387,7 +387,7 @@ for($var = 0; $i <= 60; $i++) {
 }
 */
 
-$resp = implode($config, "\n");
+$resp = implode("\n", $config);
 
 $stateless = False;
 if(property_exists($pbv, 'ks_stateless')) {
