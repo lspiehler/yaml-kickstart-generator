@@ -76,7 +76,7 @@ var spec = {
 	},
 	"servers": [
 	   {
-		  "url": "https://kickstart.sapphirehealth.org/"
+		  "url": "/"
 	   }
 	],
 	"components": {
